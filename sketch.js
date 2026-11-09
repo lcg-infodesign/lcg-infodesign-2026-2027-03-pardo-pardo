@@ -1,162 +1,231 @@
-// Pentagoni da Google Sheet: la distanza di ogni vertice dall'origine dipende dai valori della tabella
-async function preload() {  
-    myTable= loadTable("assets/famines.csv", "csv", "header");
-}
+
+let myTable;
 
 let NAME_COLUMN = "nome";
 let VALUE_COLUMNS = ["v1", "v2", "v3", "v4", "v5"];
+
+// Etichette personalizzabili del pentagono introduttivo
+let ETICHETTE = ["%FG", "%FT", "TRB", "AST", "REC"];
+
 let FILL_COLUMN = "riempimento";
 let STROKE_COLUMN = "contorno";
 let DEFAULT_FILL = "rgba(255, 255, 255, 0.5)";
 let DEFAULT_STROKE = "#ffffff";
+
 let MIN_RATIO = 0.2;
 let MAX_RATIO = 0.42;
-let SAMPLE_ROWS = [
-  { name: "Alfa", values: [8, 3, 6, 9, 4], fillColor: "rgba(230, 57, 70, 0.55)", strokeColor: "#e63946" },
-  { name: "Beta", values: [5, 7, 2, 6, 8], fillColor: "rgba(244, 162, 97, 0.55)", strokeColor: "#f4a261" },
-  { name: "Gamma", values: [9, 9, 7, 3, 5], fillColor: "rgba(233, 196, 106, 0.55)", strokeColor: "#e9c46a" },
-  { name: "Delta", values: [2, 4, 8, 5, 7], fillColor: "rgba(42, 157, 143, 0.55)", strokeColor: "#2a9d8f" },
-  { name: "Epsilon", values: [6, 6, 6, 6, 6], fillColor: "rgba(69, 123, 157, 0.55)", strokeColor: "#457b9d" },
-  { name: "Zeta", values: [3, 8, 4, 2, 9], fillColor: "rgba(142, 84, 189, 0.55)", strokeColor: "#8e54bd" }
-];
 
 let N = VALUE_COLUMNS.length;
 let cosA = new Array(N);
 let sinA = new Array(N);
-let items = [];
-let points = [];
-let centers = [];
-let cellSize = 0;
-let refRadius = 0;
-let status = "Caricamento dati...";
 
-function setup() {
-  createCanvas(windowWidth, windowHeight);
-  textAlign(CENTER, CENTER);
-  for (let i = 0; i < N; i++) {
-    let a = -HALF_PI + (TWO_PI * i) / N;
-    cosA[i] = cos(a);
-    sinA[i] = sin(a);
-  }
-  if (SHEET_URL === "") {
-    useSample("Dati di esempio (SHEET_URL vuoto)");
-    return;
-  }
-  loadTable(SHEET_URL, "csv", "header", onLoaded, onError);
-}
+let maxValori = new Array(N).fill(-Infinity);
+let minValori = new Array(N).fill(Infinity);
 
-function onLoaded(table) {
-  items = [];
-  for (let r of table.getRows()) {
-    let values = VALUE_COLUMNS.map((c) => parseFloat(String(r.getString(c)).replace(",", ".")));
-    if (values.every(Number.isFinite)) {
-      items.push({
-        name: r.getString(NAME_COLUMN),
-        values: values,
-        fillColor: r.getString(FILL_COLUMN) || DEFAULT_FILL,
-        strokeColor: r.getString(STROKE_COLUMN) || DEFAULT_STROKE
-      });
+let nPentagoni = 0;
+
+
+// SETUP
+async function setup() {
+    createCanvas(windowWidth, windowHeight);
+
+    // Caricamento CSV (p5.js 2.x)
+    try {
+        myTable = await loadTable("assets/a.csv", ";", "header");
+    } catch (errore) {
+        console.error("Errore nel caricamento del CSV:", errore);
+        return;
     }
-  }
-  if (items.length === 0) {
-    useSample("Nessuna riga valida nel foglio: dati di esempio");
-    return;
-  }
-  status = "Dati dal foglio: " + items.length + " righe";
-  buildLayout();
-}
 
-function onError() {
-  useSample("Foglio non raggiungibile: dati di esempio");
-}
+    textAlign(CENTER, CENTER);
 
-function useSample(message) {
-  items = SAMPLE_ROWS;
-  status = message;
-  buildLayout();
-}
-
-function buildLayout() {
-  let n = items.length;
-  let cols = Math.max(1, Math.ceil(Math.sqrt((n * width) / height)));
-  let rowCount = Math.ceil(n / cols);
-  cellSize = Math.min(width / cols, height / rowCount);
-  let offX = (width - cellSize * cols) / 2;
-  let offY = (height - cellSize * rowCount) / 2;
-
-  let vMin = Infinity;
-  let vMax = -Infinity;
-  for (let it of items) {
-    for (let v of it.values) {
-      vMin = Math.min(vMin, v);
-      vMax = Math.max(vMax, v);
-    }
-  }
-  let span = vMax - vMin;
-
-  points = new Array(n * N * 2);
-  centers = new Array(n * 2);
-  refRadius = cellSize * MAX_RATIO;
-  for (let k = 0; k < n; k++) {
-    let cx = offX + ((k % cols) + 0.5) * cellSize;
-    let cy = offY + (Math.floor(k / cols) + 0.5) * cellSize;
-    centers[k * 2] = cx;
-    centers[k * 2 + 1] = cy;
     for (let i = 0; i < N; i++) {
-      let t = span > 0 ? (items[k].values[i] - vMin) / span : 1;
-      let d = cellSize * lerp(MIN_RATIO, MAX_RATIO, t);
-      let idx = (k * N + i) * 2;
-      points[idx] = cx + d * cosA[i];
-      points[idx + 1] = cy + d * sinA[i];
+        let a = -HALF_PI + (TWO_PI * i) / N;
+        cosA[i] = cos(a);
+        sinA[i] = sin(a);
     }
-  }
+
+    analizzaTabella();
+
+    console.log("CSV caricato correttamente");
+    console.log("pentagoni:", nPentagoni);
+    console.log("valori minimi:", minValori);
+    console.log("valori massimi:", maxValori);
 }
 
+
+// DRAW
 function draw() {
-  background(26);
-  if (items.length === 0) {
-    noStroke();
-    fill(255);
-    text(status, width / 2, height / 2);
-    return;
-  }
-  textSize(Math.max(10, cellSize * 0.07));
-  for (let k = 0; k < items.length; k++) {
-    let cx = centers[k * 2];
-    let cy = centers[k * 2 + 1];
+    background(26);
+
+    // Pentagono introduttivo
+    disegnaPentagonoLegenda();
+
+    if (nPentagoni === 0) return;
+
+    let colonne = Math.max(1, Math.ceil(Math.sqrt((nPentagoni * windowWidth) / windowHeight)));
+    let righe = Math.ceil(nPentagoni / colonne);
+    let larghezza = windowWidth / colonne;
+    let altezza = windowHeight / righe;
+    let cellSize = Math.min(larghezza, altezza);
+
+    // Spazio riservato al pentagono introduttivo
+    let spazioLegenda = 500;
+    let offX = (windowWidth - cellSize * colonne) / 2;
+    let offY = spazioLegenda + (windowHeight - spazioLegenda - cellSize * righe) / 2;
+
+    textSize(Math.max(10, cellSize * 0.07));
+
+    let posizione = 0;
+
+    for (let numRiga = 0; numRiga < myTable.getRowCount(); numRiga++) {
+        if (rigaValida(numRiga)) {
+            let posx = offX + ((posizione % colonne) + 0.5) * cellSize;
+            let posy = offY + (Math.floor(posizione / colonne) + 0.5) * cellSize;
+
+            noFill();
+            stroke(89);
+            strokeWeight(1);
+            beginShape();
+
+            for (let i = 0; i < N; i++) {
+                vertex(
+                    posx + cellSize * MAX_RATIO * cosA[i],
+                    posy + cellSize * MAX_RATIO * sinA[i]
+                );
+            }
+
+            endShape(CLOSE);
+
+            fill(myTable.getString(numRiga, FILL_COLUMN) || DEFAULT_FILL);
+            stroke(myTable.getString(numRiga, STROKE_COLUMN) || DEFAULT_STROKE);
+            strokeWeight(2);
+            beginShape();
+
+            for (let i = 0; i < N; i++) {
+                let valore = leggiValore(numRiga, VALUE_COLUMNS[i]);
+
+                // Normalizzazione indipendente per ogni asse
+                let raggio = cellSize * MAX_RATIO;
+
+                if (maxValori[i] > minValori[i]) {
+                    raggio = map(
+                        valore,
+                        minValori[i],
+                        maxValori[i],
+                        cellSize * MIN_RATIO,
+                        cellSize * MAX_RATIO
+                    );
+                }
+
+                vertex(
+                    posx + raggio * cosA[i],
+                    posy + raggio * sinA[i]
+                );
+            }
+
+            endShape(CLOSE);
+
+            let nome = myTable.getString(numRiga, NAME_COLUMN);
+
+            noStroke();
+            fill(230);
+            text(nome, posx, posy + cellSize * 0.46);
+
+            posizione = posizione + 1;
+        }
+    }
+}
+
+
+// PENTAGONO INTRODUTTIVO CON ETICHETTE PERSONALIZZABILI
+function disegnaPentagonoLegenda() {
+    let centroX = width / 2;
+    let centroY = 100;
+    let raggio = 45;
 
     noFill();
-    stroke(89);
-    strokeWeight(1);
+    stroke(255);
+    strokeWeight(1.5);
+
     beginShape();
+
     for (let i = 0; i < N; i++) {
-      vertex(cx + refRadius * cosA[i], cy + refRadius * sinA[i]);
+        vertex(
+            centroX + raggio * cosA[i],
+            centroY + raggio * sinA[i]
+        );
     }
+
     endShape(CLOSE);
 
-    fill(items[k].fillColor);
-    stroke(items[k].strokeColor);
-    strokeWeight(2);
-    beginShape();
-    for (let i = 0; i < N; i++) {
-      let idx = (k * N + i) * 2;
-      vertex(points[idx], points[idx + 1]);
-    }
-    endShape(CLOSE);
-
+    // Testi sui vertici
     noStroke();
-    fill(230);
-    text(items[k].name, cx, cy + cellSize * 0.46);
-  }
-  textAlign(LEFT, BOTTOM);
-  fill(153);
-  text(status, 10, height - 8);
-  textAlign(CENTER, CENTER);
+    fill(255);
+    textSize(12);
+    textAlign(CENTER, CENTER);
+
+    for (let i = 0; i < N; i++) {
+        let x = centroX + (raggio + 15) * cosA[i];
+        let y = centroY + (raggio + 15) * sinA[i];
+
+        text(ETICHETTE[i], x, y);
+    }
 }
 
+
+// LETTURA VALORI CSV
+function leggiValore(numRiga, colonna) {
+    let dato = myTable.getString(numRiga, colonna);
+
+    if (dato === null || dato === undefined || String(dato).trim() === "") {
+        return NaN;
+    }
+
+    return parseFloat(String(dato).replace(",", "."));
+}
+
+
+// CONTROLLO RIGHE VALIDE
+function rigaValida(numRiga) {
+    for (let i = 0; i < N; i++) {
+        if (!Number.isFinite(leggiValore(numRiga, VALUE_COLUMNS[i]))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+// ANALISI TABELLA
+function analizzaTabella() {
+    nPentagoni = 0;
+
+    minValori = new Array(N).fill(Infinity);
+    maxValori = new Array(N).fill(-Infinity);
+
+    for (let numRiga = 0; numRiga < myTable.getRowCount(); numRiga++) {
+        if (rigaValida(numRiga)) {
+            nPentagoni = nPentagoni + 1;
+
+            for (let i = 0; i < N; i++) {
+                let valore = leggiValore(numRiga, VALUE_COLUMNS[i]);
+
+                if (valore > maxValori[i]) {
+                    maxValori[i] = valore;
+                }
+
+                if (valore < minValori[i]) {
+                    minValori[i] = valore;
+                }
+            }
+        }
+    }
+}
+
+
+// RIDIMENSIONAMENTO FINESTRA
 function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
-  if (items.length > 0) {
-    buildLayout();
-  }
+    resizeCanvas(windowWidth, windowHeight);
 }
